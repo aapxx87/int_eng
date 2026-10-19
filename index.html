@@ -671,6 +671,8 @@
     const navScrim = document.getElementById('nav-scrim');
     const mobileNav = document.getElementById('mobile-nav');
     const markdownCache = new Map();
+    const readingPositions = new Map();
+    let renderedPageId = null;
     let renderVersion = 0;
     let previewVersion = 0;
     let previewOpenTimer;
@@ -678,11 +680,34 @@
     let pinnedZIndex = 100;
     let pinnedCount = 0;
 
+    function rememberReadingPosition() {
+      if (!renderedPageId || siteNav.classList.contains('open')) return;
+      const mobile = window.matchMedia('(max-width: 750px)').matches;
+      readingPositions.set(renderedPageId, mobile ? window.scrollY : pageScroll.scrollTop);
+    }
+
+    function restoreReadingPosition(id) {
+      const top = readingPositions.get(id) || 0;
+      const mobile = window.matchMedia('(max-width: 750px)').matches;
+      const root = document.documentElement;
+      const rootBehavior = root.style.scrollBehavior;
+      const pageBehavior = pageScroll.style.scrollBehavior;
+      root.style.scrollBehavior = 'auto';
+      pageScroll.style.scrollBehavior = 'auto';
+      pageScroll.scrollTo(0, mobile ? 0 : top);
+      window.scrollTo(0, mobile ? top : 0);
+      root.style.scrollBehavior = rootBehavior;
+      pageScroll.style.scrollBehavior = pageBehavior;
+    }
+
     function setMobileMenuOpen(open) {
+      const wasOpen = siteNav.classList.contains('open');
+      if (open && !wasOpen) rememberReadingPosition();
       siteNav.classList.toggle('open', open);
       document.body.classList.toggle('mobile-menu-open', open);
       mobileNav.setAttribute('aria-expanded', String(open));
       mobileNav.setAttribute('aria-label', open ? 'Закрыть навигацию' : 'Открыть навигацию');
+      if (!open && wasOpen && renderedPageId) restoreReadingPosition(renderedPageId);
     }
 
     function syncMobileSections() {
@@ -1035,6 +1060,13 @@
       cancelScheduledPreview();
       const version = ++renderVersion;
       const id = currentId();
+      if (renderedPageId === id) {
+        setMobileMenuOpen(false);
+        return;
+      }
+      rememberReadingPosition();
+      setMobileMenuOpen(false);
+      renderedPageId = null;
       const page = pages[id];
       currentPath.textContent = page.path;
       content.innerHTML =
@@ -1070,11 +1102,22 @@
         outline.innerHTML = '';
       }
 
-      setMobileMenuOpen(false);
-      pageScroll.scrollTo(0, 0);
-      window.scrollTo(0, 0);
+      renderedPageId = id;
+      restoreReadingPosition(id);
     }
 
+    if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
+    document.addEventListener('click', event => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target.closest('a');
+      const href = link?.getAttribute('href') || '';
+      const id = href.startsWith('#') ? href.slice(1) : '';
+      if (!pages[id]) return;
+      event.preventDefault();
+      rememberReadingPosition();
+      setMobileMenuOpen(false);
+      if (id !== currentId()) location.hash = id;
+    });
     window.addEventListener('hashchange', render);
     window.addEventListener('resize', () => {
       cancelScheduledPreview();
